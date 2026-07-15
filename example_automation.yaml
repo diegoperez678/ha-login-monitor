@@ -19,7 +19,7 @@ actions:
         {{ trigger.event.data.user_name }}
       message: >-
         {{ trigger.event.data.user_name }} via
-        {{ trigger.event.data.client_name or 'unknown client' }}
+        {{ trigger.event.data.client or 'unknown client' }}
         from {{ trigger.event.data.ip_address }}
       data:
         push:

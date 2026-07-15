@@ -25,10 +25,21 @@ Event type: **`login_monitor_login`**
 |-------|---------|-------|
 | `user_name` | `Diego` | HA user the token belongs to |
 | `user_id` | `abcd...` | |
-| `client_name` | `Home Assistant iOS` / `null` | app / client that authenticated |
+| `client` | `iOS app` / `Web UI` / `https://...` | friendly label for the client (see below) |
+| `client_id` | `https://home-assistant.io/iOS` | raw OAuth client id |
+| `client_name` | `null` (usually) | only set for named long-lived tokens |
 | `token_type` | `normal` / `long_lived_access_token` | |
 | `ip_address` | `73.12.x.x` | source IP of the access |
 | `is_new_ip` | `true` | first time this IP has been seen |
+
+### About `client` / `client_name`
+
+A normal login carries **no** `client_name` — Home Assistant only sets that for
+named long-lived access tokens. The identifying value for a normal login is the
+OAuth `client_id`. The `client` field resolves the best label available:
+`client_name` if present, else a friendly name for known clients (`iOS app`,
+`Android app`, `Web UI` when the id matches your instance URL), else the raw
+`client_id`.
 
 ## Options
 

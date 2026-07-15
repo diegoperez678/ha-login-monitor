@@ -38,6 +38,14 @@ _LOGGER = logging.getLogger(__name__)
 # they are not "logins" in any meaningful sense.
 TOKEN_TYPE_SYSTEM = "system"
 
+# Normal logins carry no client_name (that field is only set for named
+# long-lived tokens); the identifying value is the OAuth client_id. Map the
+# well-known client_ids to friendly labels.
+CLIENT_LABELS = {
+    "https://home-assistant.io/iOS": "iOS app",
+    "https://home-assistant.io/android": "Android app",
+}
+
 # Marker set on our wrapper so we can recognise it, and an attribute that
 # carries the *true* original underneath it so we never lose the real method.
 _WRAP_MARKER = "_login_monitor_wrapped"
@@ -167,9 +175,12 @@ class LoginMonitor:
             return
 
         user = refresh_token.user
+        client_id = refresh_token.client_id
         data = {
             "user_name": user.name if user else None,
             "user_id": user.id if user else None,
+            "client": self._friendly_client(refresh_token.client_name, client_id),
+            "client_id": client_id,
             "client_name": refresh_token.client_name,
             "token_type": refresh_token.token_type,
             "ip_address": remote_ip,
@@ -177,6 +188,22 @@ class LoginMonitor:
         }
         _LOGGER.debug("Firing %s: %s", EVENT_LOGIN, data)
         self._hass.bus.async_fire(EVENT_LOGIN, data)
+
+    def _friendly_client(self, client_name: str | None, client_id: str | None):
+        """Best-effort human label for the client that authenticated."""
+        if client_name:
+            return client_name
+        if not client_id:
+            return None
+        if client_id in CLIENT_LABELS:
+            return CLIENT_LABELS[client_id]
+        cfg = self._hass.config
+        instance_urls = {
+            url.rstrip("/") for url in (cfg.external_url, cfg.internal_url) if url
+        }
+        if client_id.rstrip("/") in instance_urls:
+            return "Web UI"
+        return client_id
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

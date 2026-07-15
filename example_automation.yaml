@@ -21,6 +21,7 @@ actions:
         {{ trigger.event.data.user_name }} via
         {{ trigger.event.data.client or 'unknown client' }}
         from {{ trigger.event.data.ip_address }}
+        {%- if trigger.event.data.location %} ({{ trigger.event.data.location }}){% endif %}
       data:
         push:
           interruption-level: time-sensitive

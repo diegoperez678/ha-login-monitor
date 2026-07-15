@@ -15,8 +15,10 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 
 from .const import (
+    CONF_GEO_LOOKUP,
     CONF_IGNORE_SYSTEM_TOKENS,
     CONF_NEW_IP_ONLY,
+    DEFAULT_GEO_LOOKUP,
     DEFAULT_IGNORE_SYSTEM_TOKENS,
     DEFAULT_NEW_IP_ONLY,
     DOMAIN,
@@ -67,6 +69,10 @@ class LoginMonitorOptionsFlow(OptionsFlow):
                     default=options.get(
                         CONF_IGNORE_SYSTEM_TOKENS, DEFAULT_IGNORE_SYSTEM_TOKENS
                     ),
+                ): bool,
+                vol.Required(
+                    CONF_GEO_LOOKUP,
+                    default=options.get(CONF_GEO_LOOKUP, DEFAULT_GEO_LOOKUP),
                 ): bool,
             }
         )

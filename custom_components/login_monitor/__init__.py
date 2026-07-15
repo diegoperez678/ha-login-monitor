@@ -18,18 +18,25 @@ same method on top of ours (see ``async_start`` / ``async_stop``).
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
+    CONF_GEO_LOOKUP,
     CONF_IGNORE_SYSTEM_TOKENS,
     CONF_NEW_IP_ONLY,
+    DEFAULT_GEO_LOOKUP,
     DEFAULT_IGNORE_SYSTEM_TOKENS,
     DEFAULT_NEW_IP_ONLY,
     DOMAIN,
     EVENT_LOGIN,
+    GEO_PROVIDER_URL,
+    GEO_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +66,17 @@ def _get_option(entry: ConfigEntry, key: str, default):
     return entry.data.get(key, default)
 
 
+def _is_public_ip(ip: str | None) -> bool:
+    """True only for routable public IPs (skip geo lookups for LAN/loopback)."""
+    if not ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return not (addr.is_private or addr.is_loopback or addr.is_link_local)
+
+
 class LoginMonitor:
     """Wraps access-token creation and fires an event on new logins."""
 
@@ -67,11 +85,13 @@ class LoginMonitor:
         hass: HomeAssistant,
         new_ip_only: bool,
         ignore_system_tokens: bool,
+        geo_lookup: bool,
     ) -> None:
         """Initialize the monitor."""
         self._hass = hass
         self._new_ip_only = new_ip_only
         self._ignore_system_tokens = ignore_system_tokens
+        self._geo_lookup = geo_lookup
         self._known_ips: set[str] = set()
         # The true, unwrapped method. Kept valid for as long as our wrapper may
         # still execute, so a buried wrapper never calls ``None``.
@@ -186,8 +206,50 @@ class LoginMonitor:
             "ip_address": remote_ip,
             "is_new_ip": is_new_ip,
         }
+
+        # Geo lookup is a network call, so it must never run on the auth path.
+        # Schedule it as a background task that enriches then fires the event;
+        # everything else fires immediately.
+        if self._geo_lookup and _is_public_ip(remote_ip):
+            self._hass.async_create_task(self._async_fire_with_geo(data, remote_ip))
+        else:
+            self._fire(data)
+
+    @callback
+    def _fire(self, data: dict) -> None:
+        """Emit the login event on the bus."""
         _LOGGER.debug("Firing %s: %s", EVENT_LOGIN, data)
         self._hass.bus.async_fire(EVENT_LOGIN, data)
+
+    async def _async_fire_with_geo(self, data: dict, ip: str) -> None:
+        """Enrich with geolocation (best-effort) then fire — off the auth path."""
+        geo = await self._async_lookup_geo(ip)
+        self._fire({**data, **geo} if geo else data)
+
+    async def _async_lookup_geo(self, ip: str) -> dict | None:
+        """Look up approximate location for an IP via a keyless provider."""
+        session = async_get_clientsession(self._hass)
+        try:
+            async with asyncio.timeout(GEO_TIMEOUT):
+                resp = await session.get(GEO_PROVIDER_URL.format(ip=ip))
+                payload = await resp.json(content_type=None)
+        except Exception:  # noqa: BLE001 - geo is optional, never fatal (incl. timeout)
+            _LOGGER.debug("Geo lookup failed for %s", ip, exc_info=True)
+            return None
+
+        if not isinstance(payload, dict) or not payload.get("success"):
+            return None
+
+        city = payload.get("city") or None
+        region = payload.get("region") or None
+        country = payload.get("country") or None
+        location = ", ".join(part for part in (city, region, country) if part) or None
+        return {
+            "city": city,
+            "region": region,
+            "country": country,
+            "location": location,
+        }
 
     def _friendly_client(self, client_name: str | None, client_id: str | None):
         """Best-effort human label for the client that authenticated."""
@@ -214,6 +276,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ignore_system_tokens=_get_option(
             entry, CONF_IGNORE_SYSTEM_TOKENS, DEFAULT_IGNORE_SYSTEM_TOKENS
         ),
+        geo_lookup=_get_option(entry, CONF_GEO_LOOKUP, DEFAULT_GEO_LOOKUP),
     )
     await monitor.async_start()
 

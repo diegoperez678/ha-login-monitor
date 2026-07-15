@@ -31,6 +31,8 @@ Event type: **`login_monitor_login`**
 | `token_type` | `normal` / `long_lived_access_token` | |
 | `ip_address` | `73.12.x.x` | source IP of the access |
 | `is_new_ip` | `true` | first time this IP has been seen |
+| `location` | `Denver, Colorado, US` | approximate location, only when geo lookup is enabled |
+| `city` / `region` / `country` | `Denver` / `Colorado` / `US` | individual geo fields (geo lookup only) |
 
 ### About `client` / `client_name`
 
@@ -48,6 +50,12 @@ OAuth `client_id`. The `client` field resolves the best label available:
   constantly. Turn off to get an event on every access-token creation.
 - **Ignore internal system tokens** (default: on) — filters out HA's own
   internal tokens, which are used constantly and are not real logins.
+- **Add approximate location** (default: off) — enrich the event with
+  `location`/`city`/`region`/`country` via a keyless lookup (`ipwho.is`).
+  **This sends the source IP to a third-party service**, so it is opt-in. The
+  lookup runs off the auth path in a background task and never blocks or delays
+  authentication; a failed/slow lookup simply fires the event without location.
+  Private/LAN/loopback IPs are skipped.
 
 ## Install
 

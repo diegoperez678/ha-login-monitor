@@ -17,10 +17,8 @@ from homeassistant.core import callback
 from .const import (
     CONF_IGNORE_SYSTEM_TOKENS,
     CONF_NEW_IP_ONLY,
-    CONF_SCAN_INTERVAL,
     DEFAULT_IGNORE_SYSTEM_TOKENS,
     DEFAULT_NEW_IP_ONLY,
-    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
 
@@ -70,10 +68,6 @@ class LoginMonitorOptionsFlow(OptionsFlow):
                         CONF_IGNORE_SYSTEM_TOKENS, DEFAULT_IGNORE_SYSTEM_TOKENS
                     ),
                 ): bool,
-                vol.Required(
-                    CONF_SCAN_INTERVAL,
-                    default=options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-                ): vol.All(int, vol.Range(min=5, max=3600)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

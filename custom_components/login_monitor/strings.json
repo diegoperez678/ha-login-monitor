@@ -16,8 +16,7 @@
         "title": "Login Monitor options",
         "data": {
           "new_ip_only": "Only fire for new / unrecognized IP addresses",
-          "ignore_system_tokens": "Ignore internal system tokens",
-          "scan_interval": "Poll interval (seconds)"
+          "ignore_system_tokens": "Ignore internal system tokens"
         }
       }
     }

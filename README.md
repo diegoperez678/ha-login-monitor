@@ -3,12 +3,19 @@
 Home Assistant logs **failed** logins but is silent on **successful** ones: no
 log line, no event, no notification. This integration closes that gap.
 
-It watches the refresh-token table using only public, supported APIs
-(`hass.auth.async_get_users()` → each user's `refresh_tokens`) and fires a bus
-event whenever a token's `last_used_at` advances, i.e. whenever an
-authenticated session or app successfully accesses your instance.
+It wraps `AuthManager.async_create_access_token` — the single point where every
+authenticated session stamps its source IP — and fires a bus event **in real
+time** whenever an access token is minted: on login, on a new-device session,
+and on token refreshes.
 
-No monkeypatching of core, no reading `.storage/auth` directly, no removed APIs.
+**Safety:** the wrapper forwards its arguments unchanged and returns the
+original result *first*; the event fire is fully guarded in `try/except`. A bug
+in this integration therefore cannot break authentication — the worst case is a
+missed notification while logins keep working. If a future Home Assistant
+release renames that method, this integration simply fails to load (auth
+untouched).
+
+No reading `.storage/auth`, no removed APIs, no polling.
 
 ## The event
 
@@ -22,16 +29,14 @@ Event type: **`login_monitor_login`**
 | `token_type` | `normal` / `long_lived_access_token` | |
 | `ip_address` | `73.12.x.x` | source IP of the access |
 | `is_new_ip` | `true` | first time this IP has been seen |
-| `last_used_at` | `2026-07-15T14:03:11+00:00` | ISO timestamp (UTC) |
 
 ## Options
 
 - **Only fire for new / unrecognized IPs** (default: on) — keeps your own
-  phone/browser from notifying you constantly. Turn off to get an event on
-  every authenticated access.
+  phone/browser (and routine ~30-min token refreshes) from notifying you
+  constantly. Turn off to get an event on every access-token creation.
 - **Ignore internal system tokens** (default: on) — filters out HA's own
   internal tokens, which are used constantly and are not real logins.
-- **Poll interval** (default: 20s) — how often the token table is scanned.
 
 ## Install
 
@@ -44,7 +49,8 @@ Event type: **`login_monitor_login`**
 
 ## Caveats
 
-- Detection is **poll-based**, so a login is reported within one poll interval.
-- It reports *token usage*, which is the practical signal for "someone is
-  accessing my instance from this IP". The very first authenticated request
-  from a brand-new session creates a new token and fires immediately.
+- Detection is **real-time** (fires the moment an access token is created).
+- Fires on token *refreshes* as well as fresh logins; leave **new-IP-only** on
+  (the default) so routine same-IP refreshes stay silent.
+- Long-lived access tokens are used directly and are not minted through the
+  wrapped method, so their *use* is not reported (their initial creation is).

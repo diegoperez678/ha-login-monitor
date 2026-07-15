@@ -5,13 +5,15 @@ where every authenticated session stamps its source IP is
 ``AuthManager.async_create_access_token`` (it calls
 ``async_log_refresh_token_usage``, which sets ``last_used_at`` /
 ``last_used_ip``). This integration wraps that method so it can fire an event
-in real time whenever an access token is minted — i.e. on login, on new-device
-sessions, and on token refreshes.
+in real time whenever an access token is minted — i.e. on login, on a
+new-device session, and on token refreshes.
 
 Safety: the wrapper forwards ``*args`` / ``**kwargs`` unchanged and returns the
 original result first; the event fire is fully guarded. A failure in our code
 can therefore never break authentication — the worst case is a missed
-notification while logins keep working.
+notification while logins keep working. The wrapper also stays correct across
+reloads, unclean shutdowns, and the case where another integration wraps the
+same method on top of ours (see ``async_start`` / ``async_stop``).
 """
 
 from __future__ import annotations
@@ -36,8 +38,10 @@ _LOGGER = logging.getLogger(__name__)
 # they are not "logins" in any meaningful sense.
 TOKEN_TYPE_SYSTEM = "system"
 
-# Marker set on our wrapper so we never double-wrap or restore the wrong method.
+# Marker set on our wrapper so we can recognise it, and an attribute that
+# carries the *true* original underneath it so we never lose the real method.
 _WRAP_MARKER = "_login_monitor_wrapped"
+_ORIG_ATTR = "_login_monitor_original"
 
 
 def _get_option(entry: ConfigEntry, key: str, default):
@@ -61,7 +65,11 @@ class LoginMonitor:
         self._new_ip_only = new_ip_only
         self._ignore_system_tokens = ignore_system_tokens
         self._known_ips: set[str] = set()
+        # The true, unwrapped method. Kept valid for as long as our wrapper may
+        # still execute, so a buried wrapper never calls ``None``.
         self._original = None
+        self._wrapped = None
+        self._active = False
 
     async def async_start(self) -> None:
         """Seed known IPs from history and install the wrapper."""
@@ -69,24 +77,28 @@ class LoginMonitor:
 
         manager = self._hass.auth
         current = manager.async_create_access_token
-        if getattr(current, _WRAP_MARKER, False):
-            # Already wrapped (e.g. a previous entry did not clean up). Leave it.
-            _LOGGER.debug("async_create_access_token already wrapped; skipping")
-            return
-
-        self._original = current
+        # Recover the genuine original even if a stale wrapper (ours, from a
+        # previous unclean shutdown) is already installed. This takes ownership
+        # cleanly instead of stacking a second copy or going inert.
+        self._original = getattr(current, _ORIG_ATTR, current)
 
         @callback
         def _wrapped(*args, **kwargs):
             # Pass through unchanged and return first — never alter auth.
             token = self._original(*args, **kwargs)
-            try:
-                self._handle(args, kwargs)
-            except Exception:  # noqa: BLE001 - notifications must never break auth
-                _LOGGER.exception("Login Monitor failed to handle a login")
+            # ``_active`` lets async_stop neutralize this closure even when it
+            # cannot be physically removed from the call chain.
+            if self._active:
+                try:
+                    self._handle(args, kwargs)
+                except Exception:  # noqa: BLE001 - notifications must never break auth
+                    _LOGGER.exception("Login Monitor failed to handle a login")
             return token
 
         setattr(_wrapped, _WRAP_MARKER, True)
+        setattr(_wrapped, _ORIG_ATTR, self._original)
+        self._wrapped = _wrapped
+        self._active = True
         manager.async_create_access_token = _wrapped
         _LOGGER.debug(
             "Login Monitor active (new_ip_only=%s, seeded_ips=%s)",
@@ -96,14 +108,32 @@ class LoginMonitor:
 
     @callback
     def async_stop(self) -> None:
-        """Restore the original method."""
-        if self._original is None:
+        """Neutralize, and cleanly restore the original when possible."""
+        if self._wrapped is None:
+            # Never installed, or already cleanly restored — nothing to do.
             return
+
+        # Always neutralize first: even if our wrapper is buried under another
+        # integration's patch and cannot be removed, it becomes a pure
+        # pass-through and fires no further events.
+        self._active = False
+
         manager = self._hass.auth
-        # Only restore if the currently installed method is ours.
-        if getattr(manager.async_create_access_token, _WRAP_MARKER, False):
+        if manager.async_create_access_token is self._wrapped:
+            # We are still the top of the chain: physically restore.
             manager.async_create_access_token = self._original
-        self._original = None
+            self._original = None
+            self._wrapped = None
+            return
+
+        # Buried under another patch. Leave our (now inert) wrapper in place and
+        # KEEP ``self._original`` valid, so the still-live closure stays a safe
+        # pass-through rather than calling ``None``.
+        _LOGGER.warning(
+            "Login Monitor wrapper is no longer the top of the auth chain "
+            "(another integration wrapped the same method); left in place as a "
+            "neutralized pass-through until the next restart"
+        )
 
     async def _async_seed_known_ips(self) -> None:
         """Record every IP already in the token history as 'known'."""
@@ -115,8 +145,14 @@ class LoginMonitor:
     @callback
     def _handle(self, args: tuple, kwargs: dict) -> None:
         """Inspect a token-creation call and fire an event when relevant."""
-        refresh_token = kwargs.get("refresh_token") or (args[0] if args else None)
-        remote_ip = kwargs.get("remote_ip") or (args[1] if len(args) > 1 else None)
+        # Keyword-first extraction so a future signature change (an inserted
+        # positional parameter) cannot silently mis-read the IP.
+        refresh_token = kwargs.get("refresh_token")
+        if refresh_token is None and args:
+            refresh_token = args[0]
+        remote_ip = kwargs.get("remote_ip")
+        if remote_ip is None and len(args) > 1:
+            remote_ip = args[1]
         if refresh_token is None:
             return
 

@@ -23,6 +23,8 @@ actions:
         from {{ trigger.event.data.ip_address }}
         {%- if trigger.event.data.location %} ({{ trigger.event.data.location }}){% endif %}
       data:
+        # Tapping the notification opens AbuseIPDB's reputation page for the IP.
+        url: "https://www.abuseipdb.com/check/{{ trigger.event.data.ip_address }}"
         push:
           interruption-level: time-sensitive
         tag: ha-login-{{ trigger.event.data.ip_address }}

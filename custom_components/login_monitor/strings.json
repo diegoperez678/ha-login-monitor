@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Login Monitor",
+        "description": "Fire a `login_monitor_login` event whenever a successful Home Assistant login is detected. Configure notification behaviour after setup via the integration's options."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Login Monitor is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Login Monitor options",
+        "data": {
+          "new_ip_only": "Only fire for new / unrecognized IP addresses",
+          "ignore_system_tokens": "Ignore internal system tokens",
+          "scan_interval": "Poll interval (seconds)"
+        }
+      }
+    }
+  }
+}

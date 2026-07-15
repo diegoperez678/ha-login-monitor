@@ -1,0 +1,79 @@
+"""Config flow for the Login Monitor integration."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.core import callback
+
+from .const import (
+    CONF_IGNORE_SYSTEM_TOKENS,
+    CONF_NEW_IP_ONLY,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_IGNORE_SYSTEM_TOKENS,
+    DEFAULT_NEW_IP_ONLY,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
+
+
+class LoginMonitorConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle the initial setup. Single instance only."""
+
+    VERSION = 1
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the user step."""
+        if self._async_current_entries():
+            return self.async_abort(reason="single_instance_allowed")
+        if user_input is not None:
+            return self.async_create_entry(title="Login Monitor", data={})
+        return self.async_show_form(step_id="user")
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Return the options flow."""
+        return LoginMonitorOptionsFlow()
+
+
+class LoginMonitorOptionsFlow(OptionsFlow):
+    """Handle Login Monitor options."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self.config_entry.options
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_NEW_IP_ONLY,
+                    default=options.get(CONF_NEW_IP_ONLY, DEFAULT_NEW_IP_ONLY),
+                ): bool,
+                vol.Required(
+                    CONF_IGNORE_SYSTEM_TOKENS,
+                    default=options.get(
+                        CONF_IGNORE_SYSTEM_TOKENS, DEFAULT_IGNORE_SYSTEM_TOKENS
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_SCAN_INTERVAL,
+                    default=options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                ): vol.All(int, vol.Range(min=5, max=3600)),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

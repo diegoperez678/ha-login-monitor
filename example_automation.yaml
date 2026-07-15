@@ -1,0 +1,27 @@
+# Example automation: notify Diego's iPhone on a successful HA login.
+# Create this via the HA UI (Settings -> Automations -> new -> edit in YAML)
+# or through the config API once the Login Monitor integration is running.
+
+alias: Notify on successful HA login
+description: >
+  Sends a push notification whenever the Login Monitor integration reports a
+  successful authenticated access from a new/unrecognized IP.
+mode: parallel
+max: 10
+triggers:
+  - trigger: event
+    event_type: login_monitor_login
+actions:
+  - action: notify.mobile_app_diegos_iphone_16
+    data:
+      title: >-
+        {{ 'New-IP login' if trigger.event.data.is_new_ip else 'HA login' }}:
+        {{ trigger.event.data.user_name }}
+      message: >-
+        {{ trigger.event.data.user_name }} via
+        {{ trigger.event.data.client_name or 'unknown client' }}
+        from {{ trigger.event.data.ip_address }}
+      data:
+        push:
+          interruption-level: time-sensitive
+        tag: ha-login-{{ trigger.event.data.ip_address }}

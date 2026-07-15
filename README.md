@@ -17,6 +17,11 @@ untouched).
 
 No reading `.storage/auth`, no removed APIs, no polling.
 
+## Requirements
+
+Home Assistant 2024.1 or newer. The bundled brand icon is served locally and
+only appears on HA 2026.3+ (older versions work fine, just without the icon).
+
 ## The event
 
 Event type: **`login_monitor_login`**
@@ -31,8 +36,8 @@ Event type: **`login_monitor_login`**
 | `token_type` | `normal` / `long_lived_access_token` | |
 | `ip_address` | `73.12.x.x` | source IP of the access |
 | `is_new_ip` | `true` | first time this IP has been seen |
-| `location` | `Denver, Colorado, US` | approximate location, only when geo lookup is enabled |
-| `city` / `region` / `country` | `Denver` / `Colorado` / `US` | individual geo fields (geo lookup only) |
+| `location` | `Denver, Colorado, United States` | approximate location, only when geo lookup is enabled |
+| `city` / `region` / `country` | `Denver` / `Colorado` / `United States` | individual geo fields (geo lookup only) |
 
 ### About `client` / `client_name`
 
@@ -59,12 +64,17 @@ OAuth `client_id`. The `client` field resolves the best label available:
 
 ## Install
 
-1. Copy `custom_components/login_monitor/` into your HA `config/custom_components/`
-   directory (or add this repo to HACS as a custom repository → install).
+1. Add this repo to **HACS** as a custom repository (category: Integration) and
+   install it. (Or manually copy `custom_components/login_monitor/` into your HA
+   `config/custom_components/` directory.) A brand icon is bundled and served
+   locally — no `home-assistant/brands` submission is required.
 2. Restart Home Assistant (Developer Tools → restart, or `ha core restart`).
 3. Settings → Devices & Services → **Add Integration** → "Login Monitor".
-4. Build an automation triggered by the `login_monitor_login` event (see
-   `example_automation.yaml`).
+4. Click **Configure** on the integration to set new-IP-only, system-token
+   filtering, and the optional geo lookup (see [Options](#options)).
+5. Build an automation triggered by the `login_monitor_login` event (see
+   `example_automation.yaml`). The example notifies your phone and, on tap,
+   opens AbuseIPDB's reputation page for the source IP.
 
 ## Caveats
 

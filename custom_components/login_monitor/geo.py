@@ -47,10 +47,12 @@ async def async_lookup_geo(hass: HomeAssistant, ip: str) -> dict | None:
     city = payload.get("city") or None
     region = payload.get("region") or None
     country = payload.get("country") or None
+    country_code = payload.get("country_code") or None
     location = ", ".join(part for part in (city, region, country) if part) or None
     return {
         "city": city,
         "region": region,
         "country": country,
+        "country_code": country_code,
         "location": location,
     }

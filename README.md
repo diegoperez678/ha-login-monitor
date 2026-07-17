@@ -51,6 +51,7 @@ only appears on HA 2026.3+ (older versions work fine, just without the icon).
 | `ip_address` | `73.12.x.x` | source IP of the access |
 | `location` | `Denver, Colorado, United States` | approximate location, only when geo lookup is enabled |
 | `city` / `region` / `country` | `Denver` / `Colorado` / `United States` | individual geo fields (geo lookup only) |
+| `country_code` | `US` | ISO 3166-1 alpha-2 country code (geo lookup only) |
 
 ### Failed logins: `login_monitor_failed_login`
 
@@ -65,6 +66,7 @@ on restart, so an IP that failed before a restart can notify once more after).
 | `is_new_ip` | `true` | always true, the event only fires for new IPs |
 | `location` | `Amsterdam, North Holland, Netherlands` | approximate location, only when geo lookup is enabled |
 | `city` / `region` / `country` | `Amsterdam` / `North Holland` / `Netherlands` | individual geo fields (geo lookup only) |
+| `country_code` | `NL` | ISO 3166-1 alpha-2 country code (geo lookup only) |
 
 Note: `process_wrong_login` fires for *any* invalid-auth request (a mistyped
 password, an expired/invalid token, a bot probing the login endpoint), so this

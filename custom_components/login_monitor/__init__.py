@@ -4,9 +4,13 @@ Home Assistant does not emit an event when a login succeeds. The single point
 where every authenticated session stamps its source IP is
 ``AuthManager.async_create_access_token`` (it calls
 ``async_log_refresh_token_usage``, which sets ``last_used_at`` /
-``last_used_ip``). This integration wraps that method so it can fire an event
-in real time whenever an access token is minted — i.e. on login, on a
-new-device session, and on token refreshes.
+``last_used_ip``). This integration wraps that method, but only fires an event
+the first time a given refresh token is seen — i.e. on an actual new login /
+new-device session. Every later call for that same refresh token is a routine
+access-token refresh (HA mobile apps do this roughly every 30 minutes) and is
+not reported, no matter how often the source IP changes (mobile networks
+reassign IPv6 prefixes and hand off between WiFi/cellular constantly, so
+gating on IP alone fires on nearly every refresh).
 
 Safety: the wrapper forwards ``*args`` / ``**kwargs`` unchanged and returns the
 original result first; the event fire is fully guarded. A failure in our code
@@ -18,26 +22,21 @@ same method on top of ours (see ``async_start`` / ``async_stop``).
 
 from __future__ import annotations
 
-import asyncio
-import ipaddress
 import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_GEO_LOOKUP,
     CONF_IGNORE_SYSTEM_TOKENS,
-    CONF_NEW_IP_ONLY,
     DEFAULT_GEO_LOOKUP,
     DEFAULT_IGNORE_SYSTEM_TOKENS,
-    DEFAULT_NEW_IP_ONLY,
     DOMAIN,
     EVENT_LOGIN,
-    GEO_PROVIDER_URL,
-    GEO_TIMEOUT,
 )
+from .failed_login import FailedLoginMonitor
+from .geo import async_lookup_geo, is_public_ip
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,33 +65,22 @@ def _get_option(entry: ConfigEntry, key: str, default):
     return entry.data.get(key, default)
 
 
-def _is_public_ip(ip: str | None) -> bool:
-    """True only for routable public IPs (skip geo lookups for LAN/loopback)."""
-    if not ip:
-        return False
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    return not (addr.is_private or addr.is_loopback or addr.is_link_local)
-
-
 class LoginMonitor:
     """Wraps access-token creation and fires an event on new logins."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        new_ip_only: bool,
         ignore_system_tokens: bool,
         geo_lookup: bool,
     ) -> None:
         """Initialize the monitor."""
         self._hass = hass
-        self._new_ip_only = new_ip_only
         self._ignore_system_tokens = ignore_system_tokens
         self._geo_lookup = geo_lookup
-        self._known_ips: set[str] = set()
+        # Refresh tokens already known at startup, or seen fire once since —
+        # these represent already-established sessions, not new logins.
+        self._known_token_ids: set[str] = set()
         # The true, unwrapped method. Kept valid for as long as our wrapper may
         # still execute, so a buried wrapper never calls ``None``.
         self._original = None
@@ -100,8 +88,8 @@ class LoginMonitor:
         self._active = False
 
     async def async_start(self) -> None:
-        """Seed known IPs from history and install the wrapper."""
-        await self._async_seed_known_ips()
+        """Seed already-known refresh tokens and install the wrapper."""
+        await self._async_seed_known_token_ids()
 
         manager = self._hass.auth
         current = manager.async_create_access_token
@@ -129,9 +117,7 @@ class LoginMonitor:
         self._active = True
         manager.async_create_access_token = _wrapped
         _LOGGER.debug(
-            "Login Monitor active (new_ip_only=%s, seeded_ips=%s)",
-            self._new_ip_only,
-            len(self._known_ips),
+            "Login Monitor active (seeded_tokens=%s)", len(self._known_token_ids)
         )
 
     @callback
@@ -163,12 +149,16 @@ class LoginMonitor:
             "neutralized pass-through until the next restart"
         )
 
-    async def _async_seed_known_ips(self) -> None:
-        """Record every IP already in the token history as 'known'."""
+    async def _async_seed_known_token_ids(self) -> None:
+        """Record every refresh token that already exists as 'known'.
+
+        These represent sessions that were already logged in before this
+        integration started watching, so their next access-token mint is a
+        refresh, not a new login.
+        """
         for user in await self._hass.auth.async_get_users():
             for token in user.refresh_tokens.values():
-                if token.last_used_ip:
-                    self._known_ips.add(token.last_used_ip)
+                self._known_token_ids.add(token.id)
 
     @callback
     def _handle(self, args: tuple, kwargs: dict) -> None:
@@ -187,11 +177,14 @@ class LoginMonitor:
         if self._ignore_system_tokens and refresh_token.token_type == TOKEN_TYPE_SYSTEM:
             return
 
-        is_new_ip = remote_ip is not None and remote_ip not in self._known_ips
-        if remote_ip is not None:
-            self._known_ips.add(remote_ip)
-
-        if self._new_ip_only and not is_new_ip:
+        # The refresh token is the actual "this device is trusted" credential.
+        # Its access token gets reminted every ~30 min while the session is
+        # active; only the *first* mint for a given refresh token is a new
+        # login. Everything after that is a routine refresh, regardless of
+        # how many times the source IP changes in between.
+        is_new_login = refresh_token.id not in self._known_token_ids
+        self._known_token_ids.add(refresh_token.id)
+        if not is_new_login:
             return
 
         user = refresh_token.user
@@ -204,13 +197,12 @@ class LoginMonitor:
             "client_name": refresh_token.client_name,
             "token_type": refresh_token.token_type,
             "ip_address": remote_ip,
-            "is_new_ip": is_new_ip,
         }
 
         # Geo lookup is a network call, so it must never run on the auth path.
         # Schedule it as a background task that enriches then fires the event;
         # everything else fires immediately.
-        if self._geo_lookup and _is_public_ip(remote_ip):
+        if self._geo_lookup and is_public_ip(remote_ip):
             self._hass.async_create_task(self._async_fire_with_geo(data, remote_ip))
         else:
             self._fire(data)
@@ -223,33 +215,8 @@ class LoginMonitor:
 
     async def _async_fire_with_geo(self, data: dict, ip: str) -> None:
         """Enrich with geolocation (best-effort) then fire — off the auth path."""
-        geo = await self._async_lookup_geo(ip)
+        geo = await async_lookup_geo(self._hass, ip)
         self._fire({**data, **geo} if geo else data)
-
-    async def _async_lookup_geo(self, ip: str) -> dict | None:
-        """Look up approximate location for an IP via a keyless provider."""
-        session = async_get_clientsession(self._hass)
-        try:
-            async with asyncio.timeout(GEO_TIMEOUT):
-                resp = await session.get(GEO_PROVIDER_URL.format(ip=ip))
-                payload = await resp.json(content_type=None)
-        except Exception:  # noqa: BLE001 - geo is optional, never fatal (incl. timeout)
-            _LOGGER.debug("Geo lookup failed for %s", ip, exc_info=True)
-            return None
-
-        if not isinstance(payload, dict) or not payload.get("success"):
-            return None
-
-        city = payload.get("city") or None
-        region = payload.get("region") or None
-        country = payload.get("country") or None
-        location = ", ".join(part for part in (city, region, country) if part) or None
-        return {
-            "city": city,
-            "region": region,
-            "country": country,
-            "location": location,
-        }
 
     def _friendly_client(self, client_name: str | None, client_id: str | None):
         """Best-effort human label for the client that authenticated."""
@@ -270,26 +237,34 @@ class LoginMonitor:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Login Monitor from a config entry."""
+    geo_lookup = _get_option(entry, CONF_GEO_LOOKUP, DEFAULT_GEO_LOOKUP)
+
     monitor = LoginMonitor(
         hass,
-        new_ip_only=_get_option(entry, CONF_NEW_IP_ONLY, DEFAULT_NEW_IP_ONLY),
         ignore_system_tokens=_get_option(
             entry, CONF_IGNORE_SYSTEM_TOKENS, DEFAULT_IGNORE_SYSTEM_TOKENS
         ),
-        geo_lookup=_get_option(entry, CONF_GEO_LOOKUP, DEFAULT_GEO_LOOKUP),
+        geo_lookup=geo_lookup,
     )
     await monitor.async_start()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = monitor
+    failed_monitor = FailedLoginMonitor(hass, geo_lookup=geo_lookup)
+    failed_monitor.async_start()
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "monitor": monitor,
+        "failed_monitor": failed_monitor,
+    }
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry and restore the original auth method."""
-    monitor: LoginMonitor | None = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    if monitor is not None:
-        monitor.async_stop()
+    """Unload a config entry and restore the wrapped methods."""
+    stored = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    if stored is not None:
+        stored["monitor"].async_stop()
+        stored["failed_monitor"].async_stop()
     return True
 
 

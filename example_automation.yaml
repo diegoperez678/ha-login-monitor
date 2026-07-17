@@ -1,11 +1,13 @@
-# Example automation: notify Diego's iPhone on a successful HA login.
-# Create this via the HA UI (Settings -> Automations -> new -> edit in YAML)
+# Example automations for the Login Monitor integration.
+# Create these via the HA UI (Settings -> Automations -> new -> edit in YAML)
 # or through the config API once the Login Monitor integration is running.
 
+# --- Successful logins (event: login_monitor_login) ---
 alias: Notify on successful HA login
 description: >
-  Sends a push notification whenever the Login Monitor integration reports a
-  successful authenticated access from a new/unrecognized IP.
+  Sends a push notification whenever the Login Monitor integration detects a
+  new login (a refresh token used for the first time). Routine access-token
+  refreshes for an already-known session do not fire this event.
 mode: parallel
 max: 10
 triggers:
@@ -14,9 +16,7 @@ triggers:
 actions:
   - action: notify.mobile_app_diegos_iphone_16
     data:
-      title: >-
-        {{ 'New-IP login' if trigger.event.data.is_new_ip else 'HA login' }}:
-        {{ trigger.event.data.user_name }}
+      title: "New login: {{ trigger.event.data.user_name }}"
       message: >-
         {{ trigger.event.data.user_name }} via
         {{ trigger.event.data.client or 'unknown client' }}
@@ -28,3 +28,33 @@ actions:
         push:
           interruption-level: time-sensitive
         tag: ha-login-{{ trigger.event.data.ip_address }}
+
+# --- Failed logins (event: login_monitor_failed_login) ---
+# Fires once per new source IP (dedup for the life of the HA process) so a
+# public instance hit by bots does not spam you.
+#
+# This variant creates an in-HA persistent notification (the bell panel in the
+# sidebar) rather than a phone push. Swap the action for notify.mobile_app_* if
+# you want a push instead.
+---
+alias: Notify on failed HA login
+description: >
+  Creates an in-HA notification whenever the Login Monitor integration reports a
+  failed / invalid-auth login attempt from a new IP, with approximate location.
+mode: parallel
+max: 10
+triggers:
+  - trigger: event
+    event_type: login_monitor_failed_login
+actions:
+  - action: persistent_notification.create
+    data:
+      title: "⚠️ Failed HA login"
+      # Per-IP id so repeats from the same IP update in place instead of stacking.
+      notification_id: failed-login-{{ trigger.event.data.ip_address }}
+      message: >-
+        Failed login attempt from **{{ trigger.event.data.ip_address }}**
+        {%- if trigger.event.data.location %} ({{ trigger.event.data.location }}){% endif %}.
+
+
+        [Look up this IP on AbuseIPDB](https://www.abuseipdb.com/check/{{ trigger.event.data.ip_address }})

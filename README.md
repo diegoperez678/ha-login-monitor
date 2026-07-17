@@ -1,12 +1,21 @@
 # Login Monitor (Home Assistant custom integration)
 
-Home Assistant logs **failed** logins but is silent on **successful** ones: no
-log line, no event, no notification. This integration closes that gap.
+Home Assistant is silent on **successful** logins (no log line, no event, no
+notification), and while it does surface **failed** logins, it only does so as a
+hardcoded persistent notification carrying the source IP and nothing else. This
+integration closes both gaps and fires bus events **in real time** — enriched
+with approximate location — for successful *and* failed logins.
 
-It wraps `AuthManager.async_create_access_token` — the single point where every
-authenticated session stamps its source IP — and fires a bus event **in real
-time** whenever an access token is minted: on login, on a new-device session,
-and on token refreshes.
+For successful logins it wraps `AuthManager.async_create_access_token` — the
+single point where every authenticated session stamps its source IP — firing an
+event the first time a given refresh token is used. That covers a genuine new
+login or a new-device session; later access-token mints for the same refresh
+token (routine refreshes, roughly every 30 minutes while a session is active)
+do not fire again, no matter how often the source IP changes.
+
+For failed logins it wraps `http.ban.process_wrong_login` — the single point
+every invalid-auth request is funnelled through — firing an event the moment a
+login fails.
 
 **Safety:** the wrapper forwards its arguments unchanged and returns the
 original result *first*; the event fire is fully guarded in `try/except`. A bug
@@ -15,6 +24,11 @@ missed notification while logins keep working. If a future Home Assistant
 release renames that method, this integration simply fails to load (auth
 untouched).
 
+**Safety (failed logins):** the failed-login wrapper awaits Home Assistant's
+real `process_wrong_login` *first* and returns its result unchanged; our event
+fire is fully guarded, so a bug here cannot affect failed-login handling or the
+IP ban logic.
+
 No reading `.storage/auth`, no removed APIs, no polling.
 
 ## Requirements
@@ -22,9 +36,9 @@ No reading `.storage/auth`, no removed APIs, no polling.
 Home Assistant 2024.1 or newer. The bundled brand icon is served locally and
 only appears on HA 2026.3+ (older versions work fine, just without the icon).
 
-## The event
+## The events
 
-Event type: **`login_monitor_login`**
+### Successful logins — `login_monitor_login`
 
 | Field | Example | Notes |
 |-------|---------|-------|
@@ -35,9 +49,27 @@ Event type: **`login_monitor_login`**
 | `client_name` | `null` (usually) | only set for named long-lived tokens |
 | `token_type` | `normal` / `long_lived_access_token` | |
 | `ip_address` | `73.12.x.x` | source IP of the access |
-| `is_new_ip` | `true` | first time this IP has been seen |
 | `location` | `Denver, Colorado, United States` | approximate location, only when geo lookup is enabled |
 | `city` / `region` / `country` | `Denver` / `Colorado` / `United States` | individual geo fields (geo lookup only) |
+
+### Failed logins — `login_monitor_failed_login`
+
+Fired the first time each distinct source IP fails a login / invalid-auth
+request. Failures are deduplicated by IP for the life of the Home Assistant
+process, so a public instance hit by bots does not spam you (the counter resets
+on restart, so an IP that failed before a restart can notify once more after).
+
+| Field | Example | Notes |
+|-------|---------|-------|
+| `ip_address` | `185.220.x.x` | source IP of the failed attempt |
+| `is_new_ip` | `true` | always true — the event only fires for new IPs |
+| `location` | `Amsterdam, North Holland, Netherlands` | approximate location, only when geo lookup is enabled |
+| `city` / `region` / `country` | `Amsterdam` / `North Holland` / `Netherlands` | individual geo fields (geo lookup only) |
+
+Note: `process_wrong_login` fires for *any* invalid-auth request (a mistyped
+password, an expired/invalid token, a bot probing the login endpoint), so this
+event mirrors exactly what triggers Home Assistant's built-in "Login attempt
+failed" notification — just with location added.
 
 ### About `client` / `client_name`
 
@@ -50,9 +82,6 @@ OAuth `client_id`. The `client` field resolves the best label available:
 
 ## Options
 
-- **Only fire for new / unrecognized IPs** (default: on) — keeps your own
-  phone/browser (and routine ~30-min token refreshes) from notifying you
-  constantly. Turn off to get an event on every access-token creation.
 - **Ignore internal system tokens** (default: on) — filters out HA's own
   internal tokens, which are used constantly and are not real logins.
 - **Add approximate location** (default: off) — enrich the event with
@@ -70,16 +99,21 @@ OAuth `client_id`. The `client` field resolves the best label available:
    locally — no `home-assistant/brands` submission is required.
 2. Restart Home Assistant (Developer Tools → restart, or `ha core restart`).
 3. Settings → Devices & Services → **Add Integration** → "Login Monitor".
-4. Click **Configure** on the integration to set new-IP-only, system-token
-   filtering, and the optional geo lookup (see [Options](#options)).
-5. Build an automation triggered by the `login_monitor_login` event (see
-   `example_automation.yaml`). The example notifies your phone and, on tap,
-   opens AbuseIPDB's reputation page for the source IP.
+4. Click **Configure** on the integration to set system-token filtering and the
+   optional geo lookup (see [Options](#options)).
+5. Build automations triggered by the `login_monitor_login` and
+   `login_monitor_failed_login` events (see `example_automation.yaml`). The
+   successful-login example sends a phone push; the failed-login example creates
+   an in-HA persistent notification (the sidebar bell panel) — swap either for
+   the other action to taste. Both link to AbuseIPDB's reputation page for the
+   source IP.
 
 ## Caveats
 
-- Detection is **real-time** (fires the moment an access token is created).
-- Fires on token *refreshes* as well as fresh logins; leave **new-IP-only** on
-  (the default) so routine same-IP refreshes stay silent.
+- Detection is **real-time** (fires the moment an access token is created for
+  a refresh token this integration hasn't seen before).
+- Refresh tokens that already existed when the integration first started are
+  seeded as "known" at startup, so restarting Home Assistant does not
+  re-notify for every already-logged-in session.
 - Long-lived access tokens are used directly and are not minted through the
   wrapped method, so their *use* is not reported (their initial creation is).

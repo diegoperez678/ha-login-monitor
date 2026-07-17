@@ -15,7 +15,6 @@
       "init": {
         "title": "Login Monitor options",
         "data": {
-          "new_ip_only": "Only fire for new / unrecognized IP addresses",
           "ignore_system_tokens": "Ignore internal system tokens",
           "geo_lookup": "Add approximate location (sends the source IP to ipwho.is)"
         }

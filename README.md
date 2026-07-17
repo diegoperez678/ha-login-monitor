@@ -3,23 +3,23 @@
 Home Assistant is silent on **successful** logins (no log line, no event, no
 notification), and while it does surface **failed** logins, it only does so as a
 hardcoded persistent notification carrying the source IP and nothing else. This
-integration closes both gaps and fires bus events **in real time** — enriched
-with approximate location — for successful *and* failed logins.
+integration closes both gaps and fires bus events **in real time** (enriched
+with approximate location) for successful *and* failed logins.
 
-For successful logins it wraps `AuthManager.async_create_access_token` — the
-single point where every authenticated session stamps its source IP — firing an
+For successful logins it wraps `AuthManager.async_create_access_token`, the
+single point where every authenticated session stamps its source IP, firing an
 event the first time a given refresh token is used. That covers a genuine new
 login or a new-device session; later access-token mints for the same refresh
 token (routine refreshes, roughly every 30 minutes while a session is active)
 do not fire again, no matter how often the source IP changes.
 
-For failed logins it wraps `http.ban.process_wrong_login` — the single point
-every invalid-auth request is funnelled through — firing an event the moment a
+For failed logins it wraps `http.ban.process_wrong_login`, the single point
+every invalid-auth request is funnelled through, firing an event the moment a
 login fails.
 
 **Safety:** the wrapper forwards its arguments unchanged and returns the
 original result *first*; the event fire is fully guarded in `try/except`. A bug
-in this integration therefore cannot break authentication — the worst case is a
+in this integration therefore cannot break authentication: the worst case is a
 missed notification while logins keep working. If a future Home Assistant
 release renames that method, this integration simply fails to load (auth
 untouched).
@@ -38,7 +38,7 @@ only appears on HA 2026.3+ (older versions work fine, just without the icon).
 
 ## The events
 
-### Successful logins — `login_monitor_login`
+### Successful logins: `login_monitor_login`
 
 | Field | Example | Notes |
 |-------|---------|-------|
@@ -52,7 +52,7 @@ only appears on HA 2026.3+ (older versions work fine, just without the icon).
 | `location` | `Denver, Colorado, United States` | approximate location, only when geo lookup is enabled |
 | `city` / `region` / `country` | `Denver` / `Colorado` / `United States` | individual geo fields (geo lookup only) |
 
-### Failed logins — `login_monitor_failed_login`
+### Failed logins: `login_monitor_failed_login`
 
 Fired the first time each distinct source IP fails a login / invalid-auth
 request. Failures are deduplicated by IP for the life of the Home Assistant
@@ -62,18 +62,18 @@ on restart, so an IP that failed before a restart can notify once more after).
 | Field | Example | Notes |
 |-------|---------|-------|
 | `ip_address` | `185.220.x.x` | source IP of the failed attempt |
-| `is_new_ip` | `true` | always true — the event only fires for new IPs |
+| `is_new_ip` | `true` | always true, the event only fires for new IPs |
 | `location` | `Amsterdam, North Holland, Netherlands` | approximate location, only when geo lookup is enabled |
 | `city` / `region` / `country` | `Amsterdam` / `North Holland` / `Netherlands` | individual geo fields (geo lookup only) |
 
 Note: `process_wrong_login` fires for *any* invalid-auth request (a mistyped
 password, an expired/invalid token, a bot probing the login endpoint), so this
 event mirrors exactly what triggers Home Assistant's built-in "Login attempt
-failed" notification — just with location added.
+failed" notification, just with location added.
 
 ### About `client` / `client_name`
 
-A normal login carries **no** `client_name` — Home Assistant only sets that for
+A normal login carries **no** `client_name`. Home Assistant only sets that for
 named long-lived access tokens. The identifying value for a normal login is the
 OAuth `client_id`. The `client` field resolves the best label available:
 `client_name` if present, else a friendly name for known clients (`iOS app`,
@@ -82,9 +82,9 @@ OAuth `client_id`. The `client` field resolves the best label available:
 
 ## Options
 
-- **Ignore internal system tokens** (default: on) — filters out HA's own
+- **Ignore internal system tokens** (default: on): filters out HA's own
   internal tokens, which are used constantly and are not real logins.
-- **Add approximate location** (default: off) — enrich the event with
+- **Add approximate location** (default: off): enrich the event with
   `location`/`city`/`region`/`country` via a keyless lookup (`ipwho.is`).
   **This sends the source IP to a third-party service**, so it is opt-in. The
   lookup runs off the auth path in a background task and never blocks or delays
@@ -96,7 +96,7 @@ OAuth `client_id`. The `client` field resolves the best label available:
 1. Add this repo to **HACS** as a custom repository (category: Integration) and
    install it. (Or manually copy `custom_components/login_monitor/` into your HA
    `config/custom_components/` directory.) A brand icon is bundled and served
-   locally — no `home-assistant/brands` submission is required.
+   locally, so no `home-assistant/brands` submission is required.
 2. Restart Home Assistant (Developer Tools → restart, or `ha core restart`).
 3. Settings → Devices & Services → **Add Integration** → "Login Monitor".
 4. Click **Configure** on the integration to set system-token filtering and the
@@ -104,7 +104,7 @@ OAuth `client_id`. The `client` field resolves the best label available:
 5. Build automations triggered by the `login_monitor_login` and
    `login_monitor_failed_login` events (see `example_automation.yaml`). The
    successful-login example sends a phone push; the failed-login example creates
-   an in-HA persistent notification (the sidebar bell panel) — swap either for
+   an in-HA persistent notification (the sidebar bell panel); swap either for
    the other action to taste. Both link to AbuseIPDB's reputation page for the
    source IP.
 

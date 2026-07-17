@@ -5,7 +5,7 @@ where every authenticated session stamps its source IP is
 ``AuthManager.async_create_access_token`` (it calls
 ``async_log_refresh_token_usage``, which sets ``last_used_at`` /
 ``last_used_ip``). This integration wraps that method, but only fires an event
-the first time a given refresh token is seen — i.e. on an actual new login /
+the first time a given refresh token is seen, i.e. on an actual new login /
 new-device session. Every later call for that same refresh token is a routine
 access-token refresh (HA mobile apps do this roughly every 30 minutes) and is
 not reported, no matter how often the source IP changes (mobile networks
@@ -14,7 +14,7 @@ gating on IP alone fires on nearly every refresh).
 
 Safety: the wrapper forwards ``*args`` / ``**kwargs`` unchanged and returns the
 original result first; the event fire is fully guarded. A failure in our code
-can therefore never break authentication — the worst case is a missed
+can therefore never break authentication, the worst case is a missed
 notification while logins keep working. The wrapper also stays correct across
 reloads, unclean shutdowns, and the case where another integration wraps the
 same method on top of ours (see ``async_start`` / ``async_stop``).
@@ -79,7 +79,7 @@ class LoginMonitor:
         self._hass = hass
         self._ignore_system_tokens = ignore_system_tokens
         self._geo_lookup = geo_lookup
-        # Refresh tokens already known at startup, or seen fire once since —
+        # Refresh tokens already known at startup, or seen fire once since:
         # these represent already-established sessions, not new logins.
         self._known_token_ids: set[str] = set()
         # The true, unwrapped method. Kept valid for as long as our wrapper may
@@ -101,7 +101,7 @@ class LoginMonitor:
 
         @callback
         def _wrapped(*args, **kwargs):
-            # Pass through unchanged and return first — never alter auth.
+            # Pass through unchanged and return first, never alter auth.
             token = self._original(*args, **kwargs)
             # ``_active`` lets async_stop neutralize this closure even when it
             # cannot be physically removed from the call chain.
@@ -125,7 +125,7 @@ class LoginMonitor:
     def async_stop(self) -> None:
         """Neutralize, and cleanly restore the original when possible."""
         if self._wrapped is None:
-            # Never installed, or already cleanly restored — nothing to do.
+            # Never installed, or already cleanly restored, nothing to do.
             return
 
         # Always neutralize first: even if our wrapper is buried under another
@@ -215,7 +215,7 @@ class LoginMonitor:
         self._hass.bus.async_fire(EVENT_LOGIN, data)
 
     async def _async_fire_with_geo(self, data: dict, ip: str) -> None:
-        """Enrich with geolocation (best-effort) then fire — off the auth path."""
+        """Enrich with geolocation (best-effort) then fire, off the auth path."""
         geo = await async_lookup_geo(self._hass, ip)
         self._fire({**data, **geo} if geo else data)
 

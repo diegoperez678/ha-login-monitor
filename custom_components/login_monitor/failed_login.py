@@ -2,7 +2,7 @@
 
 Home Assistant *does* surface failed logins, but only as a hardcoded persistent
 notification (``Login attempt failed``) that carries the source IP and nothing
-else — no bus event, no geolocation. The single point where every invalid-auth
+else: no bus event, no geolocation. The single point where every invalid-auth
 request is funnelled is ``homeassistant.components.http.ban.process_wrong_login``.
 This monitor wraps that module-level function so it can fire an enriched event
 (with approximate location) in real time whenever a login fails.
@@ -10,7 +10,7 @@ This monitor wraps that module-level function so it can fire an enriched event
 Safety mirrors the successful-login wrapper: the real ``process_wrong_login`` is
 awaited first and its result returned unchanged; our event fire is fully guarded
 so a bug here can never affect Home Assistant's failed-login handling or the IP
-ban logic — the worst case is a missed notification.
+ban logic, the worst case is a missed notification.
 
 Noise control: a public instance is hit constantly by bots, so we fire only the
 *first* time each distinct IP fails (dedup by IP for the life of the process),
@@ -54,7 +54,7 @@ class FailedLoginMonitor:
         """Install the wrapper around ``process_wrong_login``."""
         current = http_ban.process_wrong_login
         # Recover the genuine original even if a stale wrapper (ours, from a
-        # previous unclean reload) is already installed — take ownership cleanly
+        # previous unclean reload) is already installed, take ownership cleanly
         # instead of stacking a second copy.
         self._original = getattr(current, _ORIG_ATTR, current)
 
@@ -81,7 +81,7 @@ class FailedLoginMonitor:
     def async_stop(self) -> None:
         """Neutralize, and cleanly restore the original when possible."""
         if self._wrapped is None:
-            # Never installed, or already cleanly restored — nothing to do.
+            # Never installed, or already cleanly restored, nothing to do.
             return
 
         # Always neutralize first: even if our wrapper is buried under another
@@ -133,6 +133,6 @@ class FailedLoginMonitor:
         self._hass.bus.async_fire(EVENT_FAILED_LOGIN, data)
 
     async def _async_fire_with_geo(self, data: dict, ip: str) -> None:
-        """Enrich with geolocation (best-effort) then fire — off the auth path."""
+        """Enrich with geolocation (best-effort) then fire, off the auth path."""
         geo = await async_lookup_geo(self._hass, ip)
         self._fire({**data, **geo} if geo else data)

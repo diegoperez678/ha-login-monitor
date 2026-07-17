@@ -1,14 +1,14 @@
 """Manual IP ban service for the Login Monitor integration.
 
 Calls straight into Home Assistant's own ``ip_bans.yaml`` mechanism
-(``homeassistant.components.http.ban``) — the same one HA's automatic
+(``homeassistant.components.http.ban``), the same one HA's automatic
 threshold-based banning uses. This bypasses the failed-attempt counter
 entirely, so a ban only ever happens when explicitly requested, never
 automatically.
 
 Requires ``ip_ban_enabled: true`` in the ``http:`` config; without it, HA
 never installs the ban-enforcement middleware, so there is nothing to add a
-ban to. Un-banning is not exposed by this service — HA itself only supports
+ban to. Un-banning is not exposed by this service; HA itself only supports
 that via manually editing ``ip_bans.yaml`` and restarting.
 """
 

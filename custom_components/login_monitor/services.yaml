@@ -1,0 +1,16 @@
+ban_ip:
+  name: Ban IP
+  description: >-
+    Manually ban an IP address using Home Assistant's own ip_bans.yaml
+    mechanism. Requires ip_ban_enabled: true in the http: config (set after a
+    full restart) - otherwise there is no ban-enforcement middleware to add a
+    ban to. Un-banning is not exposed; removing a ban requires editing
+    ip_bans.yaml by hand and restarting.
+  fields:
+    ip_address:
+      name: IP address
+      description: The IPv4 or IPv6 address to ban.
+      required: true
+      example: "203.0.113.42"
+      selector:
+        text:

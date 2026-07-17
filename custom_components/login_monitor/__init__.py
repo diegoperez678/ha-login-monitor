@@ -27,6 +27,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 
+from .ban_ip import async_register_ban_service, async_unregister_ban_service
 from .const import (
     CONF_GEO_LOOKUP,
     CONF_IGNORE_SYSTEM_TOKENS,
@@ -251,6 +252,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     failed_monitor = FailedLoginMonitor(hass, geo_lookup=geo_lookup)
     failed_monitor.async_start()
 
+    async_register_ban_service(hass)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "monitor": monitor,
         "failed_monitor": failed_monitor,
@@ -265,6 +268,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if stored is not None:
         stored["monitor"].async_stop()
         stored["failed_monitor"].async_stop()
+    async_unregister_ban_service(hass)
     return True
 
 

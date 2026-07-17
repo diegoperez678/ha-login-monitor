@@ -8,6 +8,10 @@ EVENT_LOGIN = "login_monitor_login"
 # Event fired on the bus when a failed / invalid-auth login attempt is detected.
 EVENT_FAILED_LOGIN = "login_monitor_failed_login"
 
+# Service that manually bans an IP address via HA's own ip_bans.yaml mechanism.
+SERVICE_BAN_IP = "ban_ip"
+ATTR_IP_ADDRESS = "ip_address"
+
 # Config / options keys.
 CONF_IGNORE_SYSTEM_TOKENS = "ignore_system_tokens"
 CONF_GEO_LOOKUP = "geo_lookup"
